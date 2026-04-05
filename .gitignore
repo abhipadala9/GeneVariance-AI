@@ -11,3 +11,8 @@ node_modules/
 # OS
 .DS_Store
 Thumbs.db
+
+# Large data files
+backend/variant_summary.txt.gz
+backend/clinvar_filtered.json
+backend/*.pkl
