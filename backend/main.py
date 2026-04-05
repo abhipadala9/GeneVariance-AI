@@ -6,6 +6,9 @@ import numpy as np
 import pandas as pd
 import json
 import os
+import urllib.request
+import urllib.parse
+import shap
 
 # Create FastAPI app
 app = FastAPI(title = "GeneVariance AI API", version="0.1.0")
@@ -32,11 +35,13 @@ else:
 ML_MODEL = None
 GENE_ENCODER = None
 AA_ENCODER = None
+SHAP_EXPLAINER = None
 
 if os.path.exists("variant_model.pkl"):
     ML_MODEL = joblib.load("variant_model.pkl")
     GENE_ENCODER = joblib.load("gene_encoder.pkl")
     AA_ENCODER = joblib.load("aa_encoder.pkl")
+    SHAP_EXPLAINER = shap.TreeExplainer(ML_MODEL)
     print("Loaded machine learning model and encoders.")
 else:
     print("Model files not found. Please run train_model.py first.")
@@ -104,14 +109,14 @@ def ml_predict(gene: str, variant: str):
 
     # Check if the model is loaded
     if ML_MODEL is None:
-        return "Model not available", 0.0
+        return "Model not available", 0.0, []
     
     
     try:
         # make gene uppercase and check if it is recognized by the gene encoder
         gene_upper = gene.upper()
         if gene_upper not in GENE_ENCODER.classes_:
-            return "Gene not recognized by model", 0.0
+            return None, 0.0, []
         
         # convert gene name to its number
         gene_encoded = GENE_ENCODER.transform([gene_upper])[0]
@@ -140,10 +145,70 @@ def ml_predict(gene: str, variant: str):
         probabilities = ML_MODEL.predict_proba(features)[0]
         confidence = round(float(probabilities[prediction]), 2)
 
-        return LABEL_NAMES[prediction], confidence
+        # label for SHAP values
+        FEATURE_NAMES = ["Gene", "Review Score", "Reference Amino Acid", "Alternate Amino Acid"]
+
+        #Runs SHAP on features to get contribution of each feature to the prediction and formats it for the frontend
+        shap_values = SHAP_EXPLAINER.shap_values(features)
+        if isinstance(shap_values, list):
+            values = shap_values[int(prediction)][0] #if shap is returning a list
+        else:
+            values = shap_values[0, :, int(prediction)] #if shap is returning a single array
+
+        # Sort the features by their absolute SHAP value to show the most important features contributing to the prediction
+        explanation = sorted(
+            # create a list of dictionaries with feature names and their corresponding SHAP values
+            [{"feature": name, "value": round(float(val), 3)} for name, val in zip(FEATURE_NAMES, values)], 
+            key = lambda x: abs(x["value"]),
+            reverse=True
+        )
+
+        return LABEL_NAMES[prediction], confidence, explanation
 
     except Exception: # catch any errors during encoding and return a default response
-        return "Error processing input", 0.0
+        return "Error processing input", 0.0, []
+
+
+# Function to search PubMed for recent papers related to the gene and variant
+def pubmed_search(gene: str, variant: str):
+    try:
+        # Construct a search query for PubMed using the gene and variant information
+        query = urllib.parse.quote(f'"{gene}"[Title/Abstract] AND "{variant}"[Title/Abstract]')
+
+        # Use the NCBI E-utilities API to search PubMed for relevant articles and retrieve their details
+        esearch_url = f"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term={query}&retmax=3&retmode=json"
+        with urllib.request.urlopen(esearch_url) as response:
+            esearch_data = json.loads(response.read().decode())
+
+        # Extract the PubMed IDs (PMIDs) from the search results and retrieve article details using the ESummary API
+        pmids = esearch_data["esearchresult"]["idlist"]
+        if not pmids:
+            return []
+        
+        # Join PMIDs into a comma-separated string for the ESummary API request
+        ids = ",".join(pmids)
+
+        # Use the ESummary API to get details for the retrieved PMIDs
+        esummary_url = f"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?db=pubmed&id={ids}&retmode=json"
+        with urllib.request.urlopen(esummary_url) as response:
+            esummary_data = json.loads(response.read().decode())
+
+        # Extract relevant information (title, journal, year, URL) for each article and return it as a list of dictionaries
+        papers = []
+        for pmid in pmids:
+            article = esummary_data["result"][pmid]
+            papers.append({
+                "title": article.get("title"),
+                "journal": article["source"],
+                "year": article["pubdate"][:4],
+                "url": f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/"
+            })
+
+        return papers
+    
+    except Exception:
+        return []
+
 
 
 # Create blueprint for the data the frontend will send to the backend
@@ -171,6 +236,9 @@ def get_gene_info(gene_name: str):
 # prediction endpoint to receive variant data and return a prediction
 @app.post("/variant/predict")
 def predict_variant(variant_request: VariantRequest):
+
+    # Search PubMed for recent papers related to the gene and variant
+    papers = pubmed_search(variant_request.gene, variant_request.variant)
     
     # Look up the variant in the ClinVar data
     matches = lookup_variant(variant_request.gene, variant_request.variant)
@@ -209,11 +277,12 @@ def predict_variant(variant_request: VariantRequest):
                 f"Associated condition: {next((p for p in top['PhenotypeList'].split('|') if p.strip() != 'not provided'), 'not provided')}",
                 f"ClinVar Variation ID: {top['VariationID']}"
             ],
+            "papers": papers,
             "notes": "This classification is based on existing ClinVar data and may not reflect the latest research. Always consult a genetic counselor or specialist for medical advice."
         }
     
     # If no exact matches are found in ClinVar, attempt to provide a prediction using the machine learning model based on gene and variant features
-    ml_classification, ml_confidence = ml_predict(variant_request.gene, variant_request.variant)
+    ml_classification, ml_confidence, ml_explanation = ml_predict(variant_request.gene, variant_request.variant)
 
     # If the machine learning model provides a classification, return it with evidence and confidence score based on the model's prediction
     if ml_classification:
@@ -228,6 +297,8 @@ def predict_variant(variant_request: VariantRequest):
                 "Classification based on gene, amino acid change, and learned patterns from ClinVar data",
                 "This prediction should be used as supplementary information and not as a definitive classification."
             ],
+            "papers": papers,
+            "explanation": ml_explanation, # SHAP explanation of feature contributions to the model's prediction
             "notes": "This classification is based on a machine learning model trained on ClinVar data. It is intended to provide additional insights but should not be used as a sole basis for medical decisions. Always consult a genetic counselor or specialist for medical advice."
         }
     
@@ -241,6 +312,7 @@ def predict_variant(variant_request: VariantRequest):
             "confidence": 0.0,
             "source": "No data available",
             "evidence": ["No matching variants found in ClinVar data. and machine learning model could not provide a prediction."],
+            "papers": papers,
             "notes": "Double check the gene symbol and variant notation. Consider using HGVS format"
         }
     

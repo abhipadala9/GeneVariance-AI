@@ -10,6 +10,8 @@ interface VariantResult {
   classification: string;
   confidence: number;
   evidence: string[];
+  papers: { title: string; journal: string; year: string; url: string }[];
+  explanation: {feature: string; value: number }[];
   notes: string;
 }
 
@@ -35,36 +37,36 @@ export default function Home() {
   };
 
   return (
-    <main className="min-h-screen bg-grey-50 flex flex-col items-center justify-center p-8">
+    <main className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-8">
       
       {/* Header and description */}
-      <h1 className="text-4xl font-bold text-grey-900 mb-2">GeneVariance AI</h1>
-      <p className="text-grey-500 mb-8">Enter a genetic variant to get a pathogenicity prediction</p>
+      <h1 className="text-4xl font-bold text-gray-900 mb-2">GeneVariance AI</h1>
+      <p className="text-gray-500 mb-8">Enter a genetic variant to get a pathogenicity prediction</p>
 
       {/* Container for Input form for gene and variant */}
       <div className="bg-white rounded=x1 shadow p-8 w-full max-w-md">
         
         {/* Gene name input */}
         <div className = "mb-4">
-          <label className="block text-sm front-medium text-grey-700 mb-1">Gene</label>
+          <label className="block text-sm front-medium text-gray-700 mb-1">Gene</label>
           <input
             type="text"
             placeholder="e.g. BRCA1"
             value = {gene}
             onChange={(e) => setGene(e.target.value)}
-            className="w-full border border-grey-300 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="w-full border border-gray-300 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
           />  
         </div>
 
         {/* Variant input */}
         <div className="mb-6">
-          <label className = "block text-sm font-medium text-grey-700 mb-1">Variant</label>
+          <label className = "block text-sm font-medium text-gray-700 mb-1">Variant</label>
           <input
             type="text"
             placeholder="e.g. A1708E"
             value={variant}
             onChange={(e) => setVariant(e.target.value)}
-            className="w-full border border-grey-300 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="w-full border border-gray-300 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
         </div>
 
@@ -79,16 +81,49 @@ export default function Home() {
 
       {/* Results Container that only shows when result is available */}
       {result && (
-        <div className = "mt-6 p-4 bg-grey-50 rounded-lg border border-grey-200">
+        <div className = "mt-6 p-4 bg-gray-50 rounded-lg border border-gray-200">
           <p className = "text-sm font-semibold text-gray-700">Classification: {result.classification}</p>
           <p className = "text-sm text-gray-500">Confidence: {result.confidence}</p>
-          <ul className = "mt-2 text-sm text-grey-600 list-disc list-inside"> {/* list of evidence */}
+          <ul className = "mt-2 text-sm text-gray-600 list-disc list-inside"> {/* list of evidence */}
             {result.evidence.map((item, index) => (
               <li key={index}>{item}</li>
             ))}
           </ul>
+
+          {/* List of related research papers if available */}
+          <div className="mt-3">
+            <p className="text-sm font-semibold text-gray-700">Related Research</p>
+            {result.papers && result.papers.length > 0 ? (
+              <ul className="mt-1 text-sm text-blue-600 list-disc list-inside">
+                {result.papers.map((paper, index) => (
+                  <li key={index}>
+                    <a href={paper.url} target="_blank" rel="noopener noreferrer">
+                      {paper.title} - {paper.journal} ({paper.year})
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="mt-1 text-sm text-gray-500">No published literature found for this specific variant.</p>
+            )}
+          </div>
+
+          {/* SHAP explanation of feature contributions to the model's prediction if available */}
+          {result.explanation && result.explanation.length > 0 && (
+            <div className = "mt-3">
+              <p className = "text-sm font-semibold text-gray-700">How is the prediction determined</p>
+              <ul className = "mt-1 text-sm text-gray-600 list-disc list-inside">
+                {result.explanation.map((item, index) => (
+                  <li key={index}>
+                    {item.feature}: {item.value > 0 ? "+" : ""}{item.value.toFixed(3)} 
+                  </li>
+                ))}
+              </ul>
+            </div>
+           )}
+
           {result.notes && (
-            <p className = "text-sm text-grey-600 mt-2">Notes: {result.notes}</p>
+            <p className = "text-sm text-gray-600 mt-2">Notes: {result.notes}</p>
           )}
         </div>
       )}
