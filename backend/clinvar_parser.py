@@ -4,7 +4,14 @@ import gzip #for unzipping downloaded data
 import json #for parsing json data
 
 # Temp genes to check for
-GENES_CHECKED = {"BRCA1", "BRCA2", "TP53", "CFTR"}
+GENES_CHECKED = {
+    "BRCA1", "BRCA2", "TP53", "CFTR",
+    "PTEN", "APC", "MLH1", "MSH2", "MSH6", "PMS2",
+    "EGFR", "KRAS", "BRAF", "ALK", "RET",
+    "ATM", "PALB2", "CDH1", "VHL", "RB1",
+    "MUTYH", "NBN", "RAD51C", "RAD51D", "CHEK2"
+}
+
 
 # ClinVar data source and output file
 CLINVAR_URL = "https://ftp.ncbi.nlm.nih.gov/pub/clinvar/tab_delimited/variant_summary.txt.gz"
